@@ -1,0 +1,12 @@
+{
+  "name": "ff-cli",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "ff-cli": "./index.js"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "download-git-repo": "^3.0.2"
+  }
+}
