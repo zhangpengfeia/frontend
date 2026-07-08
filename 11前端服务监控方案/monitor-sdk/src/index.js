@@ -1,2 +1,11 @@
-import { fn } from './module.js'
-console.log(fn())
+import { setConfig } from "./config";
+import error from "./error";
+const monitor = {
+  init(options = {}) {
+    console.log('init');
+    setConfig(options); //配置全局参数
+    error(); //错误监听处理
+  },
+};
+
+export default monitor;
