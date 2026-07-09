@@ -1,16 +1,13 @@
 # 前端服务监控
 市面上最主流：sentry，阿里arms
-```js
 核心流程：监控sdk -> 数据采集，异常收集，环境信息 -> 上报 -> 数据看板 -> 错误还原 -> 监控报警
-用户行为（事件）
-	1.手工埋点，调用sdk
-    2.无痕埋点
-    3.可视化埋点
+```js
+需要收集的数据类型：1.异常行为，2.性能数据，3.用户行为（事件）
 异常行为：
 	1.js异常，资源异常，异步处理异常
         方案：
         js错误 window.onerror,promise 未处理异常：window.onunhandledrejection，但使用window不能跨平台
-    数据请求：
+    2.数据请求：
         xhr,fetch，原型重写
         方案：重写winfow.fetch, XMLHttpRequest.prototype.send
 性能数据采集：
@@ -22,6 +19,16 @@
     6.FCP(First Contentful Paint) 浏览器首次绘制出内容元素的时间
     7.FMP（First Meaningful Paint）首次绘制用户关注内容的时间
 	谷歌提供了 web-vitals，标准化库 import { onCLS,onFCP,onLCP,onTTFB,onINP } from 'web-vitals'
+用户行为（事件）
+	1.手工埋点，调用sdk
+        方案：使用事件监听，点击，滚动，加载等事件，记录用户行为
+        事件监听：addEventListener, removeEventListener
+        事件参数：target, type, data
+    2.无痕埋点
+        PV页面浏览量访问一次算一次,UV用户访问量同一天多次访问算一次
+        页面停留时间：beforeunload写在事件，时记录用户停留时间
+        vue路由切换监听：hashchange
+    3.可视化埋点
 ```
 
 ```js
