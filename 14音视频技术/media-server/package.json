@@ -1,0 +1,21 @@
+{
+  "name": "media-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start:nms": "node src/nms.js",
+    "start:server": "node server.js",
+    "start:server2": "node server2.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.13.1",
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "node-media-server": "4.1.0"
+  }
+}

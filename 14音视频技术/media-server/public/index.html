@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>
+      弹幕直播
+    </title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      :root {
+        box-sizing: border-box;
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: inherit;
+      }
+
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial;
+        background: #1e1e2f;
+        color: #fff;
+        height: 100vh;
+        user-select: none;
+      }
+
+      .page {
+        display: flex;
+        justify-content: center;
+        padding-top: 20px;
+      }
+
+      /* 播放器容器 */
+      .player-container {
+        width: 840px;
+        max-width: 100%;
+        transition: width 0.28s ease, height 0.28s ease;
+        position: relative;
+        outline: none;
+      }
+
+      /* 宽屏（不过度拉伸，类似 B 站） */
+      .player-container.wide-mode {
+        width: 85vw !important;
+        max-width: 1400px;
+        max-height: 80vh;
+      }
+
+      /* 网页全屏：fixed 覆盖视口（使用 fixed 可保证脱离任何父容器约束） */
+      .player-container.web-fullscreen {
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        z-index: 99999;
+        background: #000;
+        border-radius: 0 !important;
+      }
+
+      .video-box {
+        position: relative;
+        border-radius: 12px;
+        overflow: hidden;
+        background: #000;
+        min-height: 360px;
+        width: 100%;
+        height: auto;
+      }
+
+      /* 当处于网页全屏时让 videoBox 填满容器高度 */
+      .player-container.web-fullscreen .video-box {
+        height: 100%;
+        border-radius: 0;
+      }
+
+      video {
+        width: 100%;
+        height: auto;
+        display: block;
+        background: #000;
+        object-fit: contain;
+      }
+
+      /* 网页全屏时 video 填满高度 */
+      .player-container.web-fullscreen video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+
+      /* 弹幕层覆盖视频，始终填满 video-box */
+      #danmu-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+      }
+
+      /* 控制栏：三列布局 */
+      .controls-bar {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 56px;
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        gap: 10px;
+        background: linear-gradient(
+          to top,
+          rgba(0, 0, 0, 0.6),
+          rgba(0, 0, 0, 0)
+        );
+        opacity: 0;
+        transition: opacity 0.18s, transform 0.18s;
+        transform: translateY(6px);
+        pointer-events: auto;
+      }
+
+      /* 悬停或显式 show-controls 时显示控制栏 */
+      .video-box:hover .controls-bar,
+      .controls-bar.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .controls-left,
+      .controls-center,
+      .controls-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .controls-left {
+        flex: 0 0 auto;
+      }
+      .controls-center {
+        flex: 1 1 auto;
+        justify-content: center;
+      }
+      .controls-right {
+        flex: 0 0 auto;
+      }
+
+      .ctrl-btn {
+        cursor: pointer;
+        padding: 6px 10px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: #fff;
+        font-size: 14px;
+      }
+      .ctrl-btn:hover {
+        background: rgba(255, 255, 255, 0.22);
+      }
+
+      .live-progress {
+        height: 6px;
+        /* background: rgba(255, 255, 255, 0.12); */
+        border-radius: 3px;
+        width: 100%;
+        max-width: 680px;
+      }
+
+      .volume-slider {
+        width: 110px;
+      }
+
+      /* 右键菜单 */
+      .context-menu {
+        position: fixed;
+        background: #2a2a3f;
+        border: 1px solid #444;
+        border-radius: 6px;
+        padding: 6px 0;
+        display: none;
+        z-index: 200000;
+        min-width: 160px;
+      }
+      .context-menu-item {
+        padding: 8px 16px;
+        cursor: pointer;
+        color: #fff;
+      }
+      .context-menu-item:hover {
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      /* 弹幕设置区域 */
+      .danmu-settings {
+        display: flex;
+        gap: 10px;
+        margin-top: 12px;
+        align-items: center;
+      }
+      select,
+      input[type="color"] {
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: none;
+        background: #2a2a3f;
+        color: #fff;
+      }
+
+      .danmu-input {
+        margin-top: 10px;
+        display: flex;
+        gap: 8px;
+      }
+      .danmu-input input {
+        flex: 1;
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: none;
+        background: #111;
+        color: #fff;
+      }
+      .danmu-input button {
+        padding: 8px 16px;
+        border-radius: 8px;
+        border: none;
+        background: #facc15;
+        color: #000;
+        font-weight: 700;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="player-container" id="player-box" tabindex="0">
+        <div class="video-box" id="video-box">
+          <video id="video" playsinline crossorigin></video>
+          <div id="danmu-layer"></div>
+
+          <div class="controls-bar" id="controls-bar">
+            <div class="controls-left">
+              <button id="play-btn" class="ctrl-btn">▶️</button>
+              <button id="mute-btn" class="ctrl-btn">🔊</button>
+              <input
+                id="volume-slider"
+                class="volume-slider"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value="1"
+                title="音量"
+              />
+            </div>
+
+            <div class="controls-center">
+              <div
+                class="live-progress"
+                id="live-progress"
+                aria-hidden="true"
+              ></div>
+            </div>
+
+            <div class="controls-right">
+              <select id="quality-select" class="ctrl-btn" title="清晰度">
+                <option value="1080p">1080p</option>
+                <option value="720p" selected>720p</option>
+                <option value="480p">480p</option>
+              </select>
+
+              <button id="wide-btn" class="ctrl-btn" title="宽屏">
+                ⇱ 宽屏
+              </button>
+              <button id="web-full-btn" class="ctrl-btn" title="网页全屏">
+                ⛶ 网页全屏
+              </button>
+              <button id="full-btn" class="ctrl-btn" title="系统全屏">
+                全屏
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="danmu-settings">
+          <select id="danmu-size" title="弹幕字号">
+            <option value="16">小号</option>
+            <option value="20" selected>中号</option>
+            <option value="26">大号</option>
+          </select>
+
+          <select id="danmu-color" title="弹幕颜色">
+            <option value="#ffffff">白色</option>
+            <option value="#ff4d4f">红色</option>
+            <option value="#40a9ff">蓝色</option>
+            <option value="#73d13d">绿色</option>
+            <option value="#facc15">黄色</option>
+          </select>
+
+          <select id="danmu-toggle" title="弹幕开关">
+            <option value="on">弹幕开</option>
+            <option value="off">弹幕关</option>
+          </select>
+        </div>
+
+        <div class="danmu-input">
+          <input id="danmu-text" placeholder="发送弹幕..." />
+          <button id="send-danmu">发送</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="context-menu" id="context-menu">
+      <div class="context-menu-item" id="ctx-play">播放/暂停</div>
+      <div class="context-menu-item" id="ctx-wide">切换宽屏</div>
+      <div class="context-menu-item" id="ctx-webfull">切换网页全屏</div>
+      <div class="context-menu-item" id="ctx-full">系统全屏</div>
+    </div>
+
+    <script>
+      /*************** 基础引用 & HLS 加载 *****************/
+      const video = document.getElementById("video");
+      const danmuLayer = document.getElementById("danmu-layer");
+      const playerBox = document.getElementById("player-box");
+      const videoBox = document.getElementById("video-box");
+      const controlsBar = document.getElementById("controls-bar");
+
+      const sources = {
+        "1080p": "http://localhost:7001/live/stream/1080p/index.m3u8",
+        "720p": "http://localhost:7001/live/stream/720p/index.m3u8",
+        "480p": "http://localhost:7001/live/stream/480p/index.m3u8",
+      };
+
+      let hls;
+      function loadSource(q) {
+        if (hls) {
+          try {
+            hls.destroy();
+          } catch (e) {}
+        }
+        hls = new Hls();
+        hls.loadSource(sources[q]);
+        hls.attachMedia(video);
+      }
+      loadSource("720p");
+
+      /*************** 控制栏显示逻辑（鼠标移动/自动隐藏） ***************/
+      let hideTimer = null;
+      function showControlsTemporarily() {
+        controlsBar.classList.add("show");
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => {
+          // 在网页全屏/系统全屏时也允许自动隐藏
+          controlsBar.classList.remove("show");
+        }, 2000);
+      }
+
+      // 鼠标在 videoBox 或 controlsBar 上移动都显示
+      ["mousemove", "touchstart"].forEach((evt) => {
+        videoBox.addEventListener(evt, showControlsTemporarily);
+        controlsBar.addEventListener(evt, showControlsTemporarily);
+      });
+      // 初始显示一次
+      showControlsTemporarily();
+
+      /*************** 播放 / 暂停 ***************/
+      const playBtn = document.getElementById("play-btn");
+      playBtn.addEventListener("click", () => {
+        if (video.paused) {
+          video.play();
+          playBtn.textContent = "⏸";
+        } else {
+          video.pause();
+          playBtn.textContent = "▶️";
+        }
+      });
+
+      /*************** 静音 / 音量 ***************/
+      const muteBtn = document.getElementById("mute-btn");
+      const volumeSlider = document.getElementById("volume-slider");
+
+      muteBtn.addEventListener("click", () => {
+        video.muted = !video.muted;
+        muteBtn.textContent = video.muted ? "🔇" : "🔊";
+      });
+
+      volumeSlider.addEventListener("input", (e) => {
+        const v = parseFloat(e.target.value);
+        video.volume = v;
+        if (v === 0) {
+          video.muted = true;
+          muteBtn.textContent = "🔇";
+        } else {
+          if (video.muted) video.muted = false;
+          muteBtn.textContent = "🔊";
+        }
+      });
+
+      /*************** 清晰度 切换 ***************/
+      const qualitySelect = document.getElementById("quality-select");
+      qualitySelect.addEventListener("change", (e) =>
+        loadSource(e.target.value)
+      );
+
+      /*************** 宽屏 / 网页全屏 / 系统全屏 ***************/
+      const wideBtn = document.getElementById("wide-btn");
+      const webFullBtn = document.getElementById("web-full-btn");
+      const fullBtn = document.getElementById("full-btn");
+
+      let isWide = false;
+      wideBtn.addEventListener("click", () => {
+        isWide = !isWide;
+        playerBox.classList.toggle("wide-mode", isWide);
+        wideBtn.textContent = isWide ? "⇲ 退出宽屏" : "⇱ 宽屏";
+        // 如果处在网页全屏，则不自动退出网页全屏（保持当前状态）
+        // 更新弹幕层高度
+        adjustDanmuLayer();
+      });
+
+      let isWebFull = false;
+      function enterWebFull() {
+        document.documentElement.style.overflow = "hidden";
+        document.body.style.overflow = "hidden";
+        playerBox.classList.add("web-fullscreen");
+        // set height explicitly so video-box fills
+        playerBox.style.height = "100vh";
+        // ensure controls visible briefly
+        showControlsTemporarily();
+        isWebFull = true;
+        webFullBtn.textContent = "⛶ 退出网页全屏";
+        adjustDanmuLayer();
+      }
+      function exitWebFull() {
+        document.documentElement.style.overflow = "";
+        document.body.style.overflow = "";
+        playerBox.classList.remove("web-fullscreen");
+        playerBox.style.height = "";
+        // show controls briefly
+        showControlsTemporarily();
+        isWebFull = false;
+        webFullBtn.textContent = "⛶ 网页全屏";
+        adjustDanmuLayer();
+      }
+
+      webFullBtn.addEventListener("click", () => {
+        if (!isWebFull) enterWebFull();
+        else exitWebFull();
+      });
+
+      fullBtn.addEventListener("click", () => {
+        if (!document.fullscreenElement) {
+          playerBox.requestFullscreen().catch(() => {});
+        } else {
+          document.exitFullscreen();
+        }
+      });
+
+      // 当按 Esc 或浏览器触发全屏变化时，确保样式同步（退出原生全屏并不应保留 web-fullscreen）
+      document.addEventListener("fullscreenchange", () => {
+        // no-op for now — we keep web-fullscreen separate from native fullscreen
+        // but ensure controls visible
+        showControlsTemporarily();
+      });
+
+      /*************** 自定义右键菜单 ***************/
+      const ctx = document.getElementById("context-menu");
+      videoBox.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        // show menu and keep within viewport
+        ctx.style.display = "block";
+        const rect = ctx.getBoundingClientRect();
+        let left = e.clientX;
+        let top = e.clientY;
+        const padding = 8;
+        if (left + rect.width + padding > window.innerWidth)
+          left = window.innerWidth - rect.width - padding;
+        if (top + rect.height + padding > window.innerHeight)
+          top = window.innerHeight - rect.height - padding;
+        ctx.style.left = left + "px";
+        ctx.style.top = top + "px";
+      });
+      document.addEventListener("click", () => (ctx.style.display = "none"));
+
+      document.getElementById("ctx-play").addEventListener("click", () => {
+        if (video.paused) video.play();
+        else video.pause();
+        ctx.style.display = "none";
+      });
+      document.getElementById("ctx-wide").addEventListener("click", () => {
+        wideBtn.click();
+        ctx.style.display = "none";
+      });
+      document.getElementById("ctx-webfull").addEventListener("click", () => {
+        webFullBtn.click();
+        ctx.style.display = "none";
+      });
+      document.getElementById("ctx-full").addEventListener("click", () => {
+        fullBtn.click();
+        ctx.style.display = "none";
+      });
+
+      /*************** 弹幕系统（位置修正 & resize 逻辑） ***************/
+      let danmuSize = 20;
+      let danmuColor = "#fff";
+      let danmuOn = true;
+
+      document
+        .getElementById("danmu-size")
+        .addEventListener(
+          "change",
+          (e) => (danmuSize = parseInt(e.target.value))
+        );
+      document
+        .getElementById("danmu-color")
+        .addEventListener("change", (e) => (danmuColor = e.target.value));
+      document
+        .getElementById("danmu-toggle")
+        .addEventListener("change", (e) => (danmuOn = e.target.value === "on"));
+
+      function adjustDanmuLayer() {
+        // ensure danmuLayer height equals videoBox clientHeight
+        // (CSS already sets inset:0, but when player size changes we recalc if needed)
+        // nothing to set via style — but we use danmuLayer.clientHeight when positioning
+      }
+
+      function createDanmu(text) {
+        if (!danmuOn) return;
+        const d = document.createElement("div");
+        d.style.position = "absolute";
+        d.style.whiteSpace = "nowrap";
+        d.style.fontSize = danmuSize + "px";
+        d.style.color = danmuColor;
+        // start at right edge
+        const layerW = danmuLayer.clientWidth || videoBox.clientWidth;
+        const layerH = danmuLayer.clientHeight || videoBox.clientHeight;
+        d.style.left = layerW + "px";
+
+        // ensure top fits in layer
+        const maxTop = Math.max(0, layerH - danmuSize - 4);
+        d.style.top = Math.random() * maxTop + "px";
+        d.textContent = text;
+        danmuLayer.appendChild(d);
+
+        // animate using requestAnimationFrame, time-based
+        const width = d.offsetWidth || 100;
+        const total = layerW + width;
+        const duration = 5 + Math.random() * 4; // seconds
+        let start = null;
+        function step(ts) {
+          if (!start) start = ts;
+          const p = (ts - start) / (duration * 1000);
+          if (p < 1) {
+            d.style.left = layerW - p * total + "px";
+            requestAnimationFrame(step);
+          } else {
+            d.remove();
+          }
+        }
+        requestAnimationFrame(step);
+      }
+
+      document.getElementById("send-danmu").addEventListener("click", () => {
+        const txt = document.getElementById("danmu-text").value.trim();
+        if (txt) {
+          createDanmu(txt);
+          document.getElementById("danmu-text").value = "";
+        }
+      });
+
+      // demo auto danmu
+      const demoInterval = setInterval(
+        () => {
+          const danmuArray = [
+            "Hello!", "测试弹幕1", "🎉", "Nice!", "Bilibili 风格",
+            "页面好清晰!", "测试弹幕2", "帧不错", "保持啊", "比心",
+            "大家好！", "666", "主播加油！", "画质好棒！", "B站弹幕效果~",
+            "老铁666", "女装大佬", "帅哥帅哥", "不要帅哥，我要美女", "这是什么直播",
+          ];
+          const randomText = danmuArray[Math.floor(Math.random()*danmuArray.length)]
+          createDanmu(randomText)
+        },
+        1500
+      );
+
+      /*************** 窗口尺寸 & 状态变化时的修正 ***************/
+      function onResizeOrStateChange() {
+        // ensure controls visibility briefly
+        showControlsTemporarily();
+        // ensure videoBox/danmu sizing OK
+        // when in web-fullscreen we set videoBox height to 100vh; when exit, reset
+        if (playerBox.classList.contains("web-fullscreen")) {
+          videoBox.style.height = "100%";
+        } else {
+          videoBox.style.height = "";
+        }
+        
+      }
+      window.addEventListener("resize", onResizeOrStateChange);
+      
+      window.addEventListener("orientationchange", onResizeOrStateChange);
+
+      onResizeOrStateChange();
+    </script>
+  </body>
+</html>
