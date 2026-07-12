@@ -1,20 +1,3 @@
-node_modules/
-dist/
-build/
-.env
-.env.*
-!.env.example
-coverage/
-*.log
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-.cache/
-.parcel-cache/
-.rpt2_cache/
-
-
 # Numerous always-ignore extensions  
 *.bak  
 *.patch  
@@ -58,3 +41,4 @@ jscoverage_lib/
 bower_components/  
 dist/ 
 .vscode/
+.turbo
