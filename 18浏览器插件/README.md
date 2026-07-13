@@ -131,4 +131,5 @@ chrome.contextMenus.create({
   })
 ```
 
-
+# 工程化开发
+安装crxjs包，可以使用 package.json 包管理方式开发浏览器插件

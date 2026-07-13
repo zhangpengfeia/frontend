@@ -1,0 +1,1 @@
+console.log("this is service_worker.ts");
