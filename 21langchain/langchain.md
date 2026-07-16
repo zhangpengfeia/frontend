@@ -80,3 +80,292 @@ Chat Completion Models
 
 ## 提示词模板
 在使用 LangChain 构建大模型应用时，**提示词（Prompt）设计是第一步**。但直接写死字符串容易出错、复用性差，也不利于维护。这时候就该用上 LangChain 提供的 **Prompt Template** —— 一个专为语言模型设计的提示词模板工具。
+
+## 结构化提示词
+```ts
+import {
+  ChatPromptTemplate,
+  SystemMessagePromptTemplate,
+  HumanMessagePromptTemplate,
+} from "@langchain/core/prompts";
+
+// 构建系统提示
+const systemPrompt = SystemMessagePromptTemplate.fromTemplate(
+  "你是一位专业导游，负责用中文向游客介绍北京特产。"
+);
+
+// 构建用户提示
+const humanPrompt = HumanMessagePromptTemplate.fromTemplate("{question}");
+
+// 组合为 ChatPromptTemplate
+const chatPrompt = ChatPromptTemplate.fromMessages([systemPrompt, humanPrompt]);
+
+// 填充变量，生成最终结构
+const messages = await chatPrompt.formatMessages({
+  question: "北京有哪些值得推荐的特产？",
+});
+console.log("生成的消息结构：", messages);
+```
+多组合模型
+```ts
+import {
+  PromptTemplate,
+  PipelinePromptTemplate,
+} from "@langchain/core/prompts";
+
+// 获取当前日期字符串
+const getDate = () => new Date().toLocaleDateString();
+
+// 1. 创建一个主模板
+const mainPt = PromptTemplate.fromTemplate(
+  `你是一个智能助理，今天是 {date}，主人的信息是 {userInfo}，
+  请根据上下文完成以下任务：
+  {todo}`
+);
+
+// 2. 创建子模板
+const timePl = PromptTemplate.fromTemplate("{date}，现在是 {time}");
+const filledTimePl = await timePl.partial({
+  date: getDate,
+});
+
+const userTpl = PromptTemplate.fromTemplate("姓名：{name}，性别：{gender}");
+const taskTpl = PromptTemplate.fromTemplate(`
+    我想吃 {time} 的 {dish}。
+    请再次确认我的信息：{userInfo}
+    `);
+
+// 3. 可以将子模板填充到主模板里面
+const finalPt = new PipelinePromptTemplate({
+  pipelinePrompts: [
+    {
+      name: "date",
+      prompt: filledTimePl,
+    },
+    {
+      name: "userInfo",
+      prompt: userTpl,
+    },
+    {
+      name: "todo",
+      prompt: taskTpl,
+    },
+  ],
+  finalPrompt: mainPt,
+});
+const result = await finalPt.format({
+  time: "12:01",
+  name: "张三",
+  gender: "男",
+  dish: "煎蛋",
+});
+console.log(result);
+```
+
+
+## Message消息对象
+Message 模块是 LangChain.js 中和大模型进行交互的 **基本单位**，用来表达**谁说了什么**，并且能携带额外的元信息。
+常见的 Message 类型有：
+1. HumanMessage：用户输入
+2. AIMessage：模型输出
+3. SystemMessage：系统指令，例如告诉模型「你是一个助手」这种角色设定
+4. FunctionMessage / ToolMessage：Function Calling 或 MCP 工具调用的结果
+5. ChatMessage：通用的消息格式，可以指定角色
+
+### 对象成员
+**1. content**
+消息的主要内容，最核心的字段。
+- 一般是 **字符串**（最常见）
+- 也可以是 **对象数组**（比如多模态：文字 + 图片）
+例子 1：纯文本
+```js
+new HumanMessage("你好！")
+{ content: "你好！" }
+
+```
+例子 2：多模态内容
+```js
+new HumanMessage({
+  content: [
+    { type: "text", text: "请描述这张图片" },
+    { type: "image_url", image_url: "https://example.com/cat.png" }
+  ]
+})
+{
+  content: [
+    { type: "text", text: "请描述这张图片" },
+    { type: "image_url", image_url: "https://example.com/cat.png" }
+  ]
+}
+```
+
+
+**2. additional_kwargs**
+附加参数，用来保存与 **OpenAI/其他模型 API 兼容的扩展字段**。
+它通常是空的 `{}`，但在某些场景下会被用到，例如 Function Calling 的场景：
+```js
+new AIMessage({
+  content: "",
+  additional_kwargs: {
+    function_call: {
+      name: "getWeather",
+      arguments: '{ "city": "北京" }'
+    }
+  }
+})
+```
+这是早期的 OpenAI Function Calling 格式（GPT-3.5/4 `2023-06-13` 那一代）。这种格式只支持一次函数调用。
+- 字段名是 `function_call`，里面直接放 `name` + `arguments`
+- arguments 是 JSON 字符串，需要开发者自己 `JSON.parse()`
+```js
+new AIMessage({
+  content: "",
+  additional_kwargs: {
+    tool_calls: [
+      {
+        id: "tool_123",
+        type: "function",
+        function: { name: "search", arguments: "{ \"query\": \"LangChain\" }" }
+      }
+    ]
+  }
+})
+```
+
+这是 OpenAI 新版 Tool Calling 格式（从 GPT-4-1106-preview 开始引入）。
+- 支持 **多次调用**（`tool_calls` 是数组，可以一次性返回多个工具调用）
+- 每个调用有 `id`（唯一标识符），方便你追踪调用 → 响应
+- `type` 明确标注了调用类型（现在主要是 `"function"`）
+- LangChain.js 会自动解析成标准化的 `tool_calls` 字段，`arguments` 会从字符串转成对象
+不过现在，在最新的 LangChain.js 中，推荐使用`tool_calls` 字段，而非塞到 `additional_kwargs` 里：
+```js
+new AIMessage({
+  content: "",
+  tool_calls: [
+    {
+      id: "tool_123",
+      name: "getWeather",
+      args: { city: "北京" },
+    },
+  ],
+});
+```
+**3. invalid_tool_calls**
+当模型给出的工具调用结果无法被 LangChain 标准化时（例如 **解析失败** 或 **结构不合法**），这些调用不会出现在 `AIMessage.tool_calls`，而是被放进 `AIMessage.invalid_tool_calls`，方便你做兜底与修复。
+
+**4. response_metadata**
+用于保存「消息是怎么来的」的元信息，常见于 **模型输出**。里面的内容取决于 LLM 的返回信息，比如：
+例子 1：OpenAI 返回的 token 消耗
+
+```js
+new AIMessage({
+  content: "你好，我是 AI 助手。",
+  response_metadata: {
+    tokenUsage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+    model_name: "gpt-4o-mini",
+    finish_reason: "stop"
+  }
+})
+```
+例子 2：Ollama 返回的时间戳
+```js
+new AIMessage({
+  content: "好的。",
+  response_metadata: {
+    created: 1724453430,
+    model: "llama3"
+  }
+})
+```
+例子 3：自定义的元信息
+```js
+new HumanMessage({
+  content: "请帮我翻译",
+  response_metadata: { source: "wechat" }
+})
+```
+**5. text**
+获取**纯文本**内容的便捷取值器。
+```js
+import { HumanMessage } from "@langchain/core/messages";
+const msg = new HumanMessage({
+  content: [
+    { type: "text", text: "请描述这张图片" },
+    { type: "image_url", image_url: "https://example.com/cat.png" },
+  ],
+});
+console.log(msg.text); // 请描述这张图片
+console.log(msg.content); // [{type:...},{type:...}]
+
+```
+**6. `getType()方法`**
+返回消息类型。
+```js
+import { HumanMessage } from "@langchain/core/messages";
+const msg = new HumanMessage({
+  content: [
+    { type: "text", text: "请描述这张图片" },
+    { type: "image_url", image_url: "https://example.com/cat.png" },
+  ],
+});
+console.log(msg.getType()); // human
+```
+`getType()` 方法常用语根据不同消息类型进行不同的处理。
+`@langchain/core/messages` 里面还提供了一组守卫方法：
+```js
+import { HumanMessage, isHumanMessage } from "@langchain/core/messages";
+const msg = new HumanMessage("你好，我叫小明");
+console.log(isHumanMessage(msg)); // true
+```
+
+### 消息占位
+在做聊天应用时，我们的提示词往往是一串按角色分好的消息
+hatPromptTemplate.fromMessages()` 明确支持由“消息模板 + 占位符”组成的形式。
+也就是说，以前我们使用 `ChatPromptTemplate.fromMessages()`，是这么使用的：
+```js
+const spt = SystemMessagePromptTemplate.fromTemplate(
+  "你是一位中国的专业导游，请使用中文向游客介绍中国的某些地区的特产"
+);
+const hpt = HumanMessagePromptTemplate.fromTemplate("我想问：{question}");
+// 将上面两个提示词进行一个组合
+const chatpt = ChatPromptTemplate.fromMessages([spt, hpt]);
+```
+那么现在，你可以在数组中添加占位符，放置的位置取决于你自己的需求：
+```js
+ChatPromptTemplate.fromMessages([
+  spt,
+  new MessagesPlaceholder("history"),
+  hpt
+]);
+```
+在上面的代码中，我们就创建了一个占位符，放置于 spt 和 hpt 这两个提示词之间。
+
+## LCEL
+LangChain Expression Language，是 LangChain 提供的一种**声明式**构建 **链式** 调用流程的方式。它允许开发者用 `.pipe()` 操作符将不同的模块（如提示模板、模型、解析器等）连接起来，形成一个完整的“链（Chain）”。
+```ts
+import { ChatOllama } from "@langchain/ollama";
+import { PromptTemplate } from "@langchain/core/prompts";
+import { StringOutputParser } from "@langchain/core/output_parsers";
+// 创建模块：提示词模块、模型模块、解析器模块
+// 1. 创建提示词
+const pt = PromptTemplate.fromTemplate("请严格使用中文解释:{question}");
+// 2. 创建模型
+const model = new ChatOllama({
+  model: "llama3",
+  temperature: 0.7,
+});
+// 3. 创建一个解析器
+const parser = new StringOutputParser();
+// 4. 将上面的 3 个模块连接起来：pipe
+// 相当于创建了一个链条
+const chain = pt.pipe(model).pipe(parser);
+// 5. 使用 chain 这个链条
+const res = await chain.stream({
+  question: "什么是闭包",
+});
+// .stream() 是异步的，.invoke() 是同步的，.batch() 是批量的
+for await (const chunk of res) {
+  process.stdout.write(chunk);
+}
+```
+
